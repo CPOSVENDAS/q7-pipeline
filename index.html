@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <title>CPOS Vendas</title>
+    <meta name="description" content="CPOS Vendas — atendimento via WhatsApp com IA, funil de vendas e follow-up automático.">
+    <meta name="author" content="CPOS Vendas" />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="CPOS Vendas">
+    <meta property="og:description" content="Atendimento via WhatsApp com IA, funil de vendas e follow-up automático.">
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="CPOS Vendas">
+    <meta name="twitter:description" content="Atendimento via WhatsApp com IA, funil de vendas e follow-up automático.">
+
+    <!-- PWA: instalável no celular (ícone na tela, abre em tela cheia, sem barra do navegador) -->
+    <link rel="manifest" href="/manifest.webmanifest">
+    <meta name="theme-color" content="#C85A12">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="CPOS Vendas">
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16.png">
+    <link rel="icon" type="image/x-icon" href="/favicon.ico">
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+    <script>
+      // Registra o service worker só em produção (https) — em dev (localhost sem https
+      // fixo, com hot-reload) ele mais atrapalha do que ajuda.
+      if ("serviceWorker" in navigator && window.location.protocol === "https:") {
+        window.addEventListener("load", () => {
+          navigator.serviceWorker.register("/sw.js").catch(() => {});
+        });
+      }
+    </script>
+  </body>
+</html>

@@ -1,0 +1,14 @@
+# project_id: identificador do projeto Supabase usado pela CLI.
+# Ao rodar `supabase link --project-ref <SEU_REF>`, a CLI atualiza este valor
+# automaticamente. Cada aluno usa o ref do PRÓPRIO projeto Supabase.
+project_id = "q7-pipeline"
+
+# Estas duas funções recebem chamadas SEM JWT (webhook da Uazapi e cron interno),
+# por isso a verificação de JWT precisa ficar desligada. Faça o deploy delas com:
+#   supabase functions deploy whatsapp-webhook --no-verify-jwt
+#   supabase functions deploy run-followups   --no-verify-jwt
+[functions.whatsapp-webhook]
+verify_jwt = false
+
+[functions.run-followups]
+verify_jwt = false

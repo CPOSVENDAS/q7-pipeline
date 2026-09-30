@@ -1,0 +1,30 @@
+{
+  "_comentario": [
+    "Conecta o Claude Code ao SEU projeto Supabase.",
+    "",
+    "COMO USAR:",
+    "  1. Copie este arquivo para .mcp.json  (Windows: copy .mcp.json.example .mcp.json)",
+    "  2. Troque SEU_PROJECT_REF pelo ref do seu projeto (Settings -> General -> Reference ID)",
+    "  3. Troque SEU_ACCESS_TOKEN pelo seu Personal Access Token",
+    "     Crie em: https://supabase.com/dashboard/account/tokens",
+    "  4. Feche e reabra o Claude Code, e aprove o servidor quando ele perguntar",
+    "  5. Apague este bloco _comentario (JSON nao aceita comentarios de verdade)",
+    "",
+    "O .mcp.json esta no .gitignore: seu token NAO vai para o GitHub.",
+    "Windows: se o servidor nao subir, troque \"command\": \"npx\" por \"command\": \"cmd\"",
+    "e use \"args\": [\"/c\", \"npx\", \"-y\", \"@supabase/mcp-server-supabase@latest\", \"--project-ref=SEU_PROJECT_REF\"]"
+  ],
+  "mcpServers": {
+    "supabase": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@supabase/mcp-server-supabase@latest",
+        "--project-ref=SEU_PROJECT_REF"
+      ],
+      "env": {
+        "SUPABASE_ACCESS_TOKEN": "SEU_ACCESS_TOKEN"
+      }
+    }
+  }
+}

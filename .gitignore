@@ -1,0 +1,41 @@
+# Dependências e build
+node_modules
+dist
+dist-ssr
+*.local
+.vercel
+
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Editor
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Variáveis de ambiente — os modelos (.example) PRECISAM ir para o repositório.
+# Atenção à ordem: uma regra `.env*` genérica depois do `!` volta a ignorar tudo.
+.env
+.env.local
+.env.development
+.env.production
+.env.test
+!.env.example
+
+# Token do Supabase usado pelo Claude Code — nunca versionar
+.mcp.json
+
+# Cache local da CLI do Supabase
+supabase/.temp/
