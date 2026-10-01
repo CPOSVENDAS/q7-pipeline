@@ -5,7 +5,26 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
-import { BarChart3, Bot, User, Send, MessageSquare, Settings, LogOut, Sparkles, Clock, Trello, X, UserPlus, Megaphone } from "lucide-react";
+import {
+  BarChart3,
+  Bot,
+  User,
+  Send,
+  MessageSquare,
+  Settings,
+  LogOut,
+  Sparkles,
+  Clock,
+  Trello,
+  X,
+  UserPlus,
+  Megaphone,
+  Search,
+  Plus,
+  StickyNote,
+  Tag as TagIcon,
+  Trash2,
+} from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import { useNavigate, Link, useSearchParams } from "react-router-dom";
 import { Logo } from "@/components/Logo";
@@ -69,7 +88,10 @@ type Conversation = {
   client_type: string | null;
   installment_plan: number | null;
   due_day: number | null;
+  notes: string | null;
 };
+
+type Tag = { id: string; name: string; color: string };
 
 type Message = {
   id: string;
@@ -172,6 +194,149 @@ export default function Conversas() {
     const { error } = await supabase.from("conversations").update({ deal_value: value }).eq("id", active.id);
     if (error) toast({ variant: "destructive", title: "Erro", description: error.message });
   };
+
+  // Notas da conversa: mesmo padrão do valor da venda (campo local + save
+  // ao perder o foco / fechar o popover), só que texto livre.
+  const [notesInput, setNotesInput] = useState("");
+  const [notesOpen, setNotesOpen] = useState(false);
+  useEffect(() => {
+    setNotesInput(active?.notes ?? "");
+  }, [active?.id, active?.notes]);
+
+  const saveNotes = async () => {
+    if (!active) return;
+    const value = notesInput.trim() || null;
+    if (value === (active.notes ?? null)) return;
+    const { error } = await supabase.from("conversations").update({ notes: value }).eq("id", active.id);
+    if (error) toast({ variant: "destructive", title: "Erro", description: error.message });
+  };
+
+  // Tags: catálogo pessoal (tags) + junção por conversa (conversation_tags).
+  // Opções fixas que o próprio vendedor cadastra e mantém (não é texto livre).
+  const [tags, setTags] = useState<Tag[]>([]);
+  const [conversationTagIds, setConversationTagIds] = useState<Record<string, string[]>>({});
+  const [tagPopoverOpen, setTagPopoverOpen] = useState(false);
+  const [newTagName, setNewTagName] = useState("");
+  const [newTagColor, setNewTagColor] = useState("#64748b");
+  const [search, setSearch] = useState("");
+
+  const loadTagsData = async () => {
+    const [{ data: tagRows }, { data: ctRows }] = await Promise.all([
+      supabase.from("tags").select("*").order("name", { ascending: true }),
+      supabase.from("conversation_tags").select("conversation_id, tag_id"),
+    ]);
+    setTags((tagRows as Tag[]) || []);
+    const map: Record<string, string[]> = {};
+    (ctRows || []).forEach((r: any) => {
+      if (!map[r.conversation_id]) map[r.conversation_id] = [];
+      map[r.conversation_id].push(r.tag_id);
+    });
+    setConversationTagIds(map);
+  };
+
+  useEffect(() => {
+    if (!user) return;
+    loadTagsData();
+    const ch = supabase
+      .channel("conversas-tags")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "tags", filter: `user_id=eq.${user.id}` },
+        loadTagsData,
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "conversation_tags", filter: `user_id=eq.${user.id}` },
+        loadTagsData,
+      )
+      .subscribe();
+    return () => {
+      supabase.removeChannel(ch);
+    };
+  }, [user]);
+
+  const createTag = async () => {
+    if (!user) return;
+    const name = newTagName.trim();
+    if (!name) return;
+    const { data, error } = await supabase
+      .from("tags")
+      .insert({ user_id: user.id, name, color: newTagColor })
+      .select()
+      .single();
+    if (error) {
+      toast({ variant: "destructive", title: "Erro", description: error.message });
+      return;
+    }
+    if (data) {
+      setTags((prev) => [...prev, data as Tag].sort((a, b) => a.name.localeCompare(b.name)));
+    }
+    setNewTagName("");
+  };
+
+  const deleteTag = async (id: string) => {
+    const { error } = await supabase.from("tags").delete().eq("id", id);
+    if (error) {
+      toast({ variant: "destructive", title: "Erro", description: error.message });
+      return;
+    }
+    setTags((prev) => prev.filter((t) => t.id !== id));
+    setConversationTagIds((prev) => {
+      const next: Record<string, string[]> = {};
+      Object.entries(prev).forEach(([convId, ids]) => {
+        next[convId] = ids.filter((t) => t !== id);
+      });
+      return next;
+    });
+  };
+
+  const toggleConversationTag = async (tagId: string) => {
+    if (!active || !user) return;
+    const current = conversationTagIds[active.id] || [];
+    const has = current.includes(tagId);
+    if (has) {
+      setConversationTagIds((prev) => ({
+        ...prev,
+        [active.id]: (prev[active.id] || []).filter((t) => t !== tagId),
+      }));
+      const { error } = await supabase
+        .from("conversation_tags")
+        .delete()
+        .eq("conversation_id", active.id)
+        .eq("tag_id", tagId);
+      if (error) {
+        toast({ variant: "destructive", title: "Erro", description: error.message });
+        loadTagsData();
+      }
+    } else {
+      setConversationTagIds((prev) => ({
+        ...prev,
+        [active.id]: [...(prev[active.id] || []), tagId],
+      }));
+      const { error } = await supabase
+        .from("conversation_tags")
+        .insert({ user_id: user.id, conversation_id: active.id, tag_id: tagId });
+      if (error) {
+        toast({ variant: "destructive", title: "Erro", description: error.message });
+        loadTagsData();
+      }
+    }
+  };
+
+  // Busca na lista: nome, telefone, notas e nome das tags.
+  const filteredConversations = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return conversations;
+    return conversations.filter((c) => {
+      const name = (c.contact_name || "").toLowerCase();
+      const phone = c.contact_phone.toLowerCase();
+      const notes = (c.notes || "").toLowerCase();
+      const tagNames = (conversationTagIds[c.id] || [])
+        .map((tid) => tags.find((t) => t.id === tid)?.name.toLowerCase() || "")
+        .join(" ");
+      return name.includes(q) || phone.includes(q) || notes.includes(q) || tagNames.includes(q);
+    });
+  }, [conversations, search, conversationTagIds, tags]);
 
   // Load conversations + realtime
   useEffect(() => {
@@ -712,6 +877,17 @@ export default function Conversas() {
               <UserPlus className="w-3.5 h-3.5 mr-1" /> Novo contato
             </Button>
           </div>
+          <div className="px-3 py-2 border-b shrink-0">
+            <div className="relative">
+              <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Buscar por nome, telefone, nota ou tag..."
+                className="h-8 pl-8 text-xs"
+              />
+            </div>
+          </div>
           <div className="flex-1 overflow-y-auto">
             {needsSetup && (
               <button
@@ -732,25 +908,48 @@ export default function Conversas() {
                 Nenhuma conversa ainda. Quando o WhatsApp receber mensagens, elas aparecem aqui.
               </div>
             )}
-            {conversations.map((c) => (
-              <button
-                key={c.id}
-                onClick={() => setActiveId(c.id)}
-                className={`w-full text-left px-3 py-3 border-b hover:bg-muted transition ${
-                  c.id === activeId ? "bg-muted" : ""
-                }`}
-              >
-                <div className="flex items-center justify-between gap-2">
-                  <span className="font-medium text-sm truncate">
-                    {c.contact_name || c.contact_phone}
-                  </span>
-                  <Badge variant={c.ai_enabled ? "default" : "secondary"} className="text-[10px]">
-                    {c.ai_enabled ? "IA" : "Humano"}
-                  </Badge>
-                </div>
-                <div className="text-xs text-muted-foreground truncate">{c.contact_phone}</div>
-              </button>
-            ))}
+            {conversations.length > 0 && filteredConversations.length === 0 && (
+              <div className="p-6 text-sm text-muted-foreground text-center">
+                Nenhuma conversa encontrada para "{search}".
+              </div>
+            )}
+            {filteredConversations.map((c) => {
+              const convTags = (conversationTagIds[c.id] || [])
+                .map((tid) => tags.find((t) => t.id === tid))
+                .filter(Boolean) as Tag[];
+              return (
+                <button
+                  key={c.id}
+                  onClick={() => setActiveId(c.id)}
+                  className={`w-full text-left px-3 py-3 border-b hover:bg-muted transition ${
+                    c.id === activeId ? "bg-muted" : ""
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-medium text-sm truncate">
+                      {c.contact_name || c.contact_phone}
+                    </span>
+                    <Badge variant={c.ai_enabled ? "default" : "secondary"} className="text-[10px]">
+                      {c.ai_enabled ? "IA" : "Humano"}
+                    </Badge>
+                  </div>
+                  <div className="text-xs text-muted-foreground truncate">{c.contact_phone}</div>
+                  {convTags.length > 0 && (
+                    <div className="flex items-center gap-1 flex-wrap mt-1">
+                      {convTags.map((t) => (
+                        <span
+                          key={t.id}
+                          className="text-[9px] px-1.5 py-0.5 rounded-full border"
+                          style={{ background: `${t.color}22`, color: t.color, borderColor: `${t.color}55` }}
+                        >
+                          {t.name}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </button>
+              );
+            })}
           </div>
         </div>
 
@@ -820,6 +1019,139 @@ export default function Conversas() {
                     <Switch checked={active.ai_enabled} onCheckedChange={toggleAI} />
                   </label>
                 </div>
+              </div>
+
+              {/* Tags e notas da conversa */}
+              <div className="px-3 py-2 border-b flex items-center gap-2 flex-wrap bg-muted/10">
+                {(conversationTagIds[active.id] || [])
+                  .map((tid) => tags.find((t) => t.id === tid))
+                  .filter(Boolean)
+                  .map((t) => (
+                    <Badge
+                      key={(t as Tag).id}
+                      variant="outline"
+                      className="text-[10px] gap-1 pr-1"
+                      style={{ borderColor: (t as Tag).color, color: (t as Tag).color }}
+                    >
+                      {(t as Tag).name}
+                      <button
+                        onClick={() => toggleConversationTag((t as Tag).id)}
+                        className="hover:text-destructive"
+                        title="Remover tag desta conversa"
+                      >
+                        <X className="w-2.5 h-2.5" />
+                      </button>
+                    </Badge>
+                  ))}
+                <Popover open={tagPopoverOpen} onOpenChange={setTagPopoverOpen}>
+                  <PopoverTrigger asChild>
+                    <Button variant="ghost" size="sm" className="h-6 text-[11px]">
+                      <TagIcon className="w-3 h-3 mr-1" /> Tags
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-64 space-y-3" align="start">
+                    <div className="space-y-1">
+                      <Label className="text-xs">Tags desta conversa</Label>
+                      {tags.length === 0 && (
+                        <p className="text-xs text-muted-foreground">Nenhuma tag cadastrada ainda.</p>
+                      )}
+                      <div className="space-y-1 max-h-40 overflow-y-auto">
+                        {tags.map((t) => {
+                          const checked = (conversationTagIds[active.id] || []).includes(t.id);
+                          return (
+                            <button
+                              key={t.id}
+                              onClick={() => toggleConversationTag(t.id)}
+                              className="w-full flex items-center justify-between gap-2 text-xs px-2 py-1.5 rounded hover:bg-muted"
+                            >
+                              <span className="flex items-center gap-2">
+                                <span className="w-2 h-2 rounded-full shrink-0" style={{ background: t.color }} />
+                                {t.name}
+                              </span>
+                              {checked && <CheckCircle2 className="w-3.5 h-3.5 text-primary shrink-0" />}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                    <div className="space-y-1.5 pt-2 border-t">
+                      <Label className="text-xs">Nova tag</Label>
+                      <div className="flex items-center gap-1.5">
+                        <input
+                          type="color"
+                          value={newTagColor}
+                          onChange={(e) => setNewTagColor(e.target.value)}
+                          className="h-7 w-7 rounded border cursor-pointer shrink-0"
+                          title="Cor da tag"
+                        />
+                        <Input
+                          value={newTagName}
+                          onChange={(e) => setNewTagName(e.target.value)}
+                          placeholder="Ex.: VIP, Urgente..."
+                          className="h-7 text-xs"
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") {
+                              e.preventDefault();
+                              createTag();
+                            }
+                          }}
+                        />
+                        <Button size="sm" className="h-7 px-2 shrink-0" onClick={createTag} disabled={!newTagName.trim()}>
+                          <Plus className="w-3 h-3" />
+                        </Button>
+                      </div>
+                    </div>
+                    {tags.length > 0 && (
+                      <div className="space-y-1 pt-2 border-t">
+                        <Label className="text-xs text-muted-foreground">Gerenciar (excluir tira de todas as conversas)</Label>
+                        <div className="space-y-1 max-h-28 overflow-y-auto">
+                          {tags.map((t) => (
+                            <div key={t.id} className="flex items-center justify-between gap-2 text-xs px-2 py-1">
+                              <span className="flex items-center gap-2 truncate">
+                                <span className="w-2 h-2 rounded-full shrink-0" style={{ background: t.color }} />
+                                <span className="truncate">{t.name}</span>
+                              </span>
+                              <button
+                                onClick={() => deleteTag(t.id)}
+                                className="text-muted-foreground hover:text-destructive shrink-0"
+                                title="Excluir esta tag"
+                              >
+                                <Trash2 className="w-3 h-3" />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </PopoverContent>
+                </Popover>
+                <Popover
+                  open={notesOpen}
+                  onOpenChange={(o) => {
+                    setNotesOpen(o);
+                    if (!o) saveNotes();
+                  }}
+                >
+                  <PopoverTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className={`h-6 text-[11px] ${active.notes ? "text-primary" : ""}`}
+                    >
+                      <StickyNote className="w-3 h-3 mr-1" /> Notas
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-72 space-y-2" align="start">
+                    <Label className="text-xs">Notas sobre esta conversa</Label>
+                    <Textarea
+                      value={notesInput}
+                      onChange={(e) => setNotesInput(e.target.value)}
+                      onBlur={saveNotes}
+                      rows={5}
+                      placeholder="Ex.: prefere ser contatado à noite, já tem outro plano com a concorrente..."
+                    />
+                  </PopoverContent>
+                </Popover>
               </div>
 
               {active.installment_plan != null && (

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { Link, useNavigate } from "react-router-dom";
@@ -64,6 +64,7 @@ type Conversation = {
   due_day: number | null;
   commission_eligible: boolean;
 };
+type Tag = { id: string; name: string; color: string };
 
 const formatBRL = (v: number) =>
   v.toLocaleString("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 0 });
@@ -76,6 +77,7 @@ function Card({
   stage,
   loyaltyStageId,
   onMoveToStage,
+  cardTags,
 }: {
   c: Conversation;
   userId: string;
@@ -84,6 +86,7 @@ function Card({
   stage?: Stage;
   loyaltyStageId?: string | null;
   onMoveToStage?: (convId: string, stageId: string) => void;
+  cardTags?: Tag[];
 }) {
   const navigate = useNavigate();
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({ id: c.id });
@@ -110,6 +113,19 @@ function Card({
         </Badge>
       </div>
       <div className="text-xs text-muted-foreground truncate">{c.contact_phone}</div>
+      {cardTags && cardTags.length > 0 && (
+        <div className="mt-1.5 flex items-center gap-1 flex-wrap">
+          {cardTags.map((t) => (
+            <span
+              key={t.id}
+              className="text-[9px] px-1.5 py-0.5 rounded-full border"
+              style={{ background: `${t.color}22`, color: t.color, borderColor: `${t.color}55` }}
+            >
+              {t.name}
+            </span>
+          ))}
+        </div>
+      )}
       <div className="mt-2 flex items-center gap-2 flex-wrap">
         {c.deal_value != null && (
           <span className="text-[11px] font-medium text-primary">{formatBRL(c.deal_value)}</span>
@@ -162,6 +178,7 @@ function Column({
   onToggleFlag,
   loyaltyStageId,
   onMoveToStage,
+  tagsByConv,
 }: {
   stage: Stage;
   cards: Conversation[];
@@ -173,6 +190,7 @@ function Column({
   onToggleFlag: (id: string, field: "is_won" | "is_lost" | "is_loyalty", value: boolean) => void;
   loyaltyStageId: string | null;
   onMoveToStage: (convId: string, stageId: string) => void;
+  tagsByConv: Record<string, Tag[]>;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: `stage-${stage.id}` });
   const [editing, setEditing] = useState(false);
@@ -272,6 +290,7 @@ function Column({
             stage={stage}
             loyaltyStageId={loyaltyStageId}
             onMoveToStage={onMoveToStage}
+            cardTags={tagsByConv[c.id]}
           />
         ))}
       </div>
@@ -285,6 +304,8 @@ export default function Kanban() {
   const [stages, setStages] = useState<Stage[]>([]);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [installments, setInstallments] = useState<SaleInstallment[]>([]);
+  const [tags, setTags] = useState<Tag[]>([]);
+  const [conversationTagIds, setConversationTagIds] = useState<Record<string, string[]>>({});
   const [activeCard, setActiveCard] = useState<Conversation | null>(null);
   const [configOpen, setConfigOpen] = useState(false);
   const [addStageOpen, setAddStageOpen] = useState(false);
@@ -316,17 +337,34 @@ export default function Kanban() {
       .select("id, conversation_id, installment_no, paid_at");
     setInstallments((data as SaleInstallment[]) || []);
   };
+  // Tags: só exibição aqui (chip no card) — gerenciar/atribuir fica em Conversas.
+  const loadTags = async () => {
+    const [{ data: tagRows }, { data: ctRows }] = await Promise.all([
+      supabase.from("tags").select("*"),
+      supabase.from("conversation_tags").select("conversation_id, tag_id"),
+    ]);
+    setTags((tagRows as Tag[]) || []);
+    const map: Record<string, string[]> = {};
+    (ctRows || []).forEach((r: any) => {
+      if (!map[r.conversation_id]) map[r.conversation_id] = [];
+      map[r.conversation_id].push(r.tag_id);
+    });
+    setConversationTagIds(map);
+  };
 
   useEffect(() => {
     if (!user) return;
     loadStages();
     loadConvs();
     loadInstallments();
+    loadTags();
     const ch = supabase
       .channel("kanban-live")
       .on("postgres_changes", { event: "*", schema: "public", table: "conversations", filter: `user_id=eq.${user.id}` }, loadConvs)
       .on("postgres_changes", { event: "*", schema: "public", table: "pipeline_stages", filter: `user_id=eq.${user.id}` }, loadStages)
       .on("postgres_changes", { event: "*", schema: "public", table: "sale_installments", filter: `user_id=eq.${user.id}` }, loadInstallments)
+      .on("postgres_changes", { event: "*", schema: "public", table: "tags", filter: `user_id=eq.${user.id}` }, loadTags)
+      .on("postgres_changes", { event: "*", schema: "public", table: "conversation_tags", filter: `user_id=eq.${user.id}` }, loadTags)
       .subscribe();
     return () => {
       supabase.removeChannel(ch);
@@ -334,6 +372,13 @@ export default function Kanban() {
   }, [user]);
 
   const installmentsByConv = groupInstallments(installments);
+  const tagsByConv = useMemo(() => {
+    const map: Record<string, Tag[]> = {};
+    Object.entries(conversationTagIds).forEach(([convId, tagIds]) => {
+      map[convId] = tagIds.map((tid) => tags.find((t) => t.id === tid)).filter(Boolean) as Tag[];
+    });
+    return map;
+  }, [conversationTagIds, tags]);
   // Primeira coluna marcada como "fidelizado" — é pra lá que o botão do card
   // manda o cliente que já quitou todas as parcelas (ver Card acima).
   const loyaltyStageId = stages.find((s) => s.is_loyalty)?.id ?? null;
@@ -583,6 +628,7 @@ export default function Kanban() {
                 onToggleFlag={toggleStageFlag}
                 loyaltyStageId={loyaltyStageId}
                 onMoveToStage={moveConvToStage}
+                tagsByConv={tagsByConv}
               />
             ))}
             {stages.length > 0 && (
