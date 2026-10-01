@@ -1,4 +1,4 @@
-# Q7 Pipeline — CRM de WhatsApp com IA
+# CPOS Vendas — CRM de WhatsApp com IA
 
 CRM de atendimento por WhatsApp com **IA que responde sozinha**, funil de vendas tipo
 Kanban e follow-ups automáticos. Cada instalação é **100% independente**: você conecta

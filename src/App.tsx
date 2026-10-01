@@ -19,6 +19,7 @@ import NotFound from "./pages/NotFound";
 // esse peso à toa.
 const Relatorios = lazy(() => import("./pages/Relatorios"));
 const Equipe = lazy(() => import("./pages/admin/Equipe"));
+const Transmissao = lazy(() => import("./pages/Transmissao"));
 
 const queryClient = new QueryClient();
 
@@ -40,6 +41,16 @@ const App = () => (
                 <ProtectedRoute>
                   <Suspense fallback={<div className="min-h-screen flex items-center justify-center text-sm text-muted-foreground">Carregando…</div>}>
                     <Relatorios />
+                  </Suspense>
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/transmissao"
+              element={
+                <ProtectedRoute>
+                  <Suspense fallback={<div className="min-h-screen flex items-center justify-center text-sm text-muted-foreground">Carregando…</div>}>
+                    <Transmissao />
                   </Suspense>
                 </ProtectedRoute>
               }

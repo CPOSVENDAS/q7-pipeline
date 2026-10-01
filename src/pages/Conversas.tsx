@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
-import { BarChart3, Bot, User, Send, MessageSquare, Settings, LogOut, Sparkles, Clock, Trello, X, UserPlus } from "lucide-react";
+import { BarChart3, Bot, User, Send, MessageSquare, Settings, LogOut, Sparkles, Clock, Trello, X, UserPlus, Megaphone } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import { useNavigate, Link, useSearchParams } from "react-router-dom";
 import { Logo } from "@/components/Logo";
@@ -649,6 +649,12 @@ export default function Conversas() {
             >
               Relatórios
             </Link>
+            <Link
+              to="/transmissao"
+              className="px-3 py-1.5 text-sm rounded-md text-muted-foreground hover:bg-muted transition"
+            >
+              Transmissão
+            </Link>
           </nav>
         </div>
         <div className="flex items-center gap-1">
@@ -657,6 +663,9 @@ export default function Conversas() {
           </Button>
           <Button variant="ghost" size="icon" className="sm:hidden" onClick={() => navigate("/relatorios")} title="Relatórios">
             <BarChart3 className="w-4 h-4" />
+          </Button>
+          <Button variant="ghost" size="icon" className="sm:hidden" onClick={() => navigate("/transmissao")} title="Transmissão">
+            <Megaphone className="w-4 h-4" />
           </Button>
           <ThemeToggle />
           {isAdmin && (

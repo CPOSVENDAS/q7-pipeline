@@ -1,4 +1,4 @@
-# INSTALL.md — Instalação manual do Q7 Pipeline
+# INSTALL.md — Instalação manual do CPOS Vendas
 
 Do repositório clonado até o WhatsApp respondendo sozinho, usando **a sua própria
 infraestrutura**. Tempo estimado: **30–45 min**.
@@ -37,7 +37,7 @@ infraestrutura**. Tempo estimado: **30–45 min**.
 ## 1. Baixar e instalar dependências
 
 ```bash
-cd q7pipeline
+cd cpos-vendas
 npm install
 ```
 
@@ -46,7 +46,7 @@ npm install
 ## 2. Criar o projeto no Supabase
 
 1. https://supabase.com → **New project**
-2. Nome (ex.: `q7-crm`), senha de banco forte, região mais próxima, plano **Free**
+2. Nome (ex.: `cpos-vendas`), senha de banco forte, região mais próxima, plano **Free**
 3. Espere provisionar (~2 min)
 4. Anote em **Project Settings → General**: o **Reference ID** → seu `<REF>`
 5. Anote em **Project Settings → API**:
@@ -182,7 +182,7 @@ variáveis `VITE_*` entram no build, não são lidas em tempo real.
 git init
 git add .
 git status          # confira que .env e .mcp.json NÃO aparecem
-git commit -m "Q7 Pipeline — instalação inicial"
+git commit -m "CPOS Vendas — instalação inicial"
 ```
 
 Crie um repositório vazio em github.com/new e:

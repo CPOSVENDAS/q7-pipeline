@@ -19,7 +19,7 @@ import {
   useDroppable,
   useDraggable,
 } from "@dnd-kit/core";
-import { BarChart3, Bot, Clock, LogOut, MessageSquare, Plus, Settings, Trash2, User, Pencil, Trophy, XCircle, Heart } from "lucide-react";
+import { BarChart3, Bot, Clock, LogOut, MessageSquare, Plus, Settings, Trash2, User, Pencil, Trophy, XCircle, Heart, Megaphone } from "lucide-react";
 import { ConfigDrawer } from "@/components/ConfigDrawer";
 import { InstallmentChecklist } from "@/components/InstallmentChecklist";
 import { SaleInstallment, groupInstallments } from "@/lib/installments";
@@ -493,6 +493,9 @@ export default function Kanban() {
             <Link to="/relatorios" className="px-3 py-1.5 text-sm rounded-md text-muted-foreground hover:bg-muted transition">
               Relatórios
             </Link>
+            <Link to="/transmissao" className="px-3 py-1.5 text-sm rounded-md text-muted-foreground hover:bg-muted transition">
+              Transmissão
+            </Link>
           </nav>
         </div>
         <div className="flex items-center gap-1">
@@ -501,6 +504,9 @@ export default function Kanban() {
           </Button>
           <Button variant="ghost" size="icon" className="sm:hidden" onClick={() => navigate("/relatorios")} title="Relatórios">
             <BarChart3 className="w-4 h-4" />
+          </Button>
+          <Button variant="ghost" size="icon" className="sm:hidden" onClick={() => navigate("/transmissao")} title="Transmissão">
+            <Megaphone className="w-4 h-4" />
           </Button>
           <Button variant="ghost" size="sm" onClick={() => setConfigOpen(true)}>
             <Settings className="w-4 h-4 sm:mr-2" />

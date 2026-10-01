@@ -1,9 +1,9 @@
-# TESTING.md — Roteiro E2E pós-deploy (Q7 Pipeline)
+# TESTING.md — Roteiro E2E pós-deploy (CPOS Vendas)
 
 Guia completo para validar a aplicação **depois** do deploy no Vercel (frontend) + Supabase próprio (backend, edge functions, cron). Cobre infraestrutura, setup inicial, as 15 Waves funcionais e limpeza pós-teste.
 
 > Substitua `<REF>` pelo ref do seu projeto Supabase (ex.: `abcd1234`).
-> Substitua `<VERCEL_URL>` pela URL pública do Vercel (ex.: `q7pipe.vercel.app`).
+> Substitua `<VERCEL_URL>` pela URL pública do Vercel (ex.: `cpos-vendas.vercel.app`).
 
 ---
 

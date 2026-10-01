@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/hooks/use-toast";
-import { Download, LogOut, MessageSquare, Trello, TrendingUp, Trophy, XCircle, Percent, Target, Banknote, Send } from "lucide-react";
+import { Download, LogOut, MessageSquare, Trello, TrendingUp, Trophy, XCircle, Percent, Target, Banknote, Send, Megaphone } from "lucide-react";
 import {
   Bar,
   BarChart,
@@ -597,6 +597,9 @@ export default function Relatorios() {
             <Link to="/relatorios" className="px-3 py-1.5 text-sm rounded-md bg-muted font-medium">
               Relatórios
             </Link>
+            <Link to="/transmissao" className="px-3 py-1.5 text-sm rounded-md text-muted-foreground hover:bg-muted transition">
+              Transmissão
+            </Link>
           </nav>
         </div>
         <div className="flex items-center gap-1">
@@ -605,6 +608,9 @@ export default function Relatorios() {
           </Button>
           <Button variant="ghost" size="icon" className="sm:hidden" onClick={() => navigate("/kanban")} title="Kanban">
             <Trello className="w-4 h-4" />
+          </Button>
+          <Button variant="ghost" size="icon" className="sm:hidden" onClick={() => navigate("/transmissao")} title="Transmissão">
+            <Megaphone className="w-4 h-4" />
           </Button>
           <Button variant="ghost" size="icon" onClick={async () => { await signOut(); navigate("/login"); }} title="Sair">
             <LogOut className="w-4 h-4" />

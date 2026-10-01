@@ -1,4 +1,4 @@
-# CLAUDE.md — Q7 Pipeline
+# CLAUDE.md — CPOS Vendas
 
 > Instruções para o Claude Code. Quem estiver lendo este arquivo é o assistente
 > que vai **instalar e operar** este projeto para o usuário.
@@ -9,7 +9,7 @@
 
 Não mande ele ler documentação. **Instale para ele.**
 
-1. Responda com um resumo curto do que o Q7 Pipeline é e do que a instalação envolve
+1. Responda com um resumo curto do que o CPOS Vendas é e do que a instalação envolve
    (Supabase + Vercel + WhatsApp + IA, ~20 min com você fazendo o trabalho).
 2. Peça **de uma vez só** as credenciais da tabela da [Etapa 1](#etapa-1--coletar-as-credenciais).
    Não pergunte uma por uma.
@@ -277,7 +277,7 @@ O projeto vem **sem** repositório git. Crie um:
 ```bash
 git init
 git add .
-git commit -m "Q7 Pipeline — instalação inicial"
+git commit -m "CPOS Vendas — instalação inicial"
 ```
 
 Antes do commit, confirme que `.env` e `.mcp.json` **não** estão na lista
@@ -287,7 +287,7 @@ Com o `gh` CLI disponível:
 
 ```bash
 gh auth status                                  # se não estiver logado: gh auth login
-gh repo create q7-pipeline --private --source=. --push
+gh repo create cpos-vendas --private --source=. --push
 ```
 
 Sem o `gh`: mande o usuário criar o repositório vazio em github.com/new e então:
