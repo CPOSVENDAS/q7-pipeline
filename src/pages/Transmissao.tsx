@@ -7,9 +7,23 @@ import { brandWatermarkStyle } from "@/lib/brandWatermark";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { toast } from "@/hooks/use-toast";
-import { LogOut, MessageSquare, Trello, BarChart3, Megaphone, Image as ImageIcon, Mic, X } from "lucide-react";
+import {
+  LogOut,
+  MessageSquare,
+  Trello,
+  BarChart3,
+  Megaphone,
+  Image as ImageIcon,
+  Mic,
+  FileText,
+  Trash2,
+  ChevronDown,
+  ChevronUp,
+  X,
+} from "lucide-react";
 
 type Stage = { id: string; name: string; position: number };
 
@@ -20,6 +34,17 @@ type BroadcastRow = {
   sent_count: number;
   failed_count: number;
   status: string;
+  created_at: string;
+};
+
+type LibraryKind = "image" | "audio" | "text";
+
+type LibraryItem = {
+  id: string;
+  kind: LibraryKind;
+  title: string;
+  file_url: string | null;
+  text_content: string | null;
   created_at: string;
 };
 
@@ -44,6 +69,17 @@ export default function Transmissao() {
   const [sending, setSending] = useState(false);
   const [history, setHistory] = useState<BroadcastRow[]>([]);
 
+  // Biblioteca de prontos (áudios/fotos/textos pré-gravados), pessoal por vendedor.
+  const [library, setLibrary] = useState<LibraryItem[]>([]);
+  const [libraryOpen, setLibraryOpen] = useState(false);
+  const [newKind, setNewKind] = useState<LibraryKind>("image");
+  const [newTitle, setNewTitle] = useState("");
+  const [newFile, setNewFile] = useState<File | null>(null);
+  const [newText, setNewText] = useState("");
+  const [savingItem, setSavingItem] = useState(false);
+  const [selectedImageLibId, setSelectedImageLibId] = useState<string>("");
+  const [selectedAudioLibId, setSelectedAudioLibId] = useState<string>("");
+
   const loadHistory = () => {
     if (!user) return;
     supabase
@@ -55,6 +91,16 @@ export default function Transmissao() {
       .then(({ data }) => setHistory(data || []));
   };
 
+  const loadLibrary = () => {
+    if (!user) return;
+    supabase
+      .from("media_library")
+      .select("id, kind, title, file_url, text_content, created_at")
+      .eq("user_id", user.id)
+      .order("created_at", { ascending: false })
+      .then(({ data }) => setLibrary((data as LibraryItem[]) || []));
+  };
+
   useEffect(() => {
     if (!user) return;
     supabase
@@ -64,6 +110,7 @@ export default function Transmissao() {
       .order("position", { ascending: true })
       .then(({ data }) => setStages(data || []));
     loadHistory();
+    loadLibrary();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user]);
 
@@ -102,19 +149,24 @@ export default function Transmissao() {
     return data.publicUrl;
   };
 
+  const libraryImage = library.find((l) => l.id === selectedImageLibId) || null;
+  const libraryAudio = library.find((l) => l.id === selectedAudioLibId) || null;
+
   const handleSend = async () => {
     if (!stageId) {
       toast({ variant: "destructive", title: "Escolha uma coluna" });
       return;
     }
-    if (!caption.trim() && !imageFile && !audioFile) {
+    const hasImage = !!imageFile || !!libraryImage;
+    const hasAudio = !!audioFile || !!libraryAudio;
+    if (!caption.trim() && !hasImage && !hasAudio) {
       toast({ variant: "destructive", title: "Mande pelo menos uma foto, um áudio ou um texto" });
       return;
     }
     setSending(true);
     try {
-      let imageUrl: string | null = null;
-      let audioUrl: string | null = null;
+      let imageUrl: string | null = libraryImage?.file_url ?? null;
+      let audioUrl: string | null = libraryAudio?.file_url ?? null;
       if (imageFile) imageUrl = await uploadMedia(imageFile, "image");
       if (audioFile) audioUrl = await uploadMedia(audioFile, "audio");
 
@@ -132,6 +184,8 @@ export default function Transmissao() {
       setCaption("");
       setImageFile(null);
       setAudioFile(null);
+      setSelectedImageLibId("");
+      setSelectedAudioLibId("");
       loadHistory();
     } catch (e: any) {
       toast({ variant: "destructive", title: "Erro ao enviar", description: e.message });
@@ -139,6 +193,61 @@ export default function Transmissao() {
       setSending(false);
     }
   };
+
+  const handleAddLibraryItem = async () => {
+    if (!user) return;
+    if (!newTitle.trim()) {
+      toast({ variant: "destructive", title: "Dê um título pro item" });
+      return;
+    }
+    if (newKind === "text" && !newText.trim()) {
+      toast({ variant: "destructive", title: "Escreva o texto pronto" });
+      return;
+    }
+    if (newKind !== "text" && !newFile) {
+      toast({ variant: "destructive", title: newKind === "image" ? "Escolha a foto" : "Escolha o áudio" });
+      return;
+    }
+    setSavingItem(true);
+    try {
+      let fileUrl: string | null = null;
+      if (newKind !== "text" && newFile) {
+        fileUrl = await uploadMedia(newFile, newKind);
+      }
+      const { error } = await supabase.from("media_library").insert({
+        user_id: user.id,
+        kind: newKind,
+        title: newTitle.trim(),
+        file_url: fileUrl,
+        text_content: newKind === "text" ? newText.trim() : null,
+      });
+      if (error) throw new Error(error.message);
+      toast({ title: "Salvo na biblioteca!" });
+      setNewTitle("");
+      setNewFile(null);
+      setNewText("");
+      loadLibrary();
+    } catch (e: any) {
+      toast({ variant: "destructive", title: "Erro ao salvar", description: e.message });
+    } finally {
+      setSavingItem(false);
+    }
+  };
+
+  const handleDeleteLibraryItem = async (item: LibraryItem) => {
+    const { error } = await supabase.from("media_library").delete().eq("id", item.id);
+    if (error) {
+      toast({ variant: "destructive", title: "Erro ao excluir", description: error.message });
+      return;
+    }
+    if (selectedImageLibId === item.id) setSelectedImageLibId("");
+    if (selectedAudioLibId === item.id) setSelectedAudioLibId("");
+    loadLibrary();
+  };
+
+  const libraryImages = library.filter((l) => l.kind === "image");
+  const libraryAudios = library.filter((l) => l.kind === "audio");
+  const libraryTexts = library.filter((l) => l.kind === "text");
 
   return (
     <div className="min-h-screen flex flex-col bg-background" style={brandWatermarkStyle}>
@@ -217,8 +326,9 @@ export default function Transmissao() {
               <input
                 type="file"
                 accept="image/*"
+                disabled={!!selectedImageLibId}
                 onChange={(e) => setImageFile(e.target.files?.[0] || null)}
-                className="text-sm file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:bg-muted file:text-sm w-full"
+                className="text-sm file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:bg-muted file:text-sm w-full disabled:opacity-50"
               />
               {imageFile && (
                 <div className="flex items-center justify-between text-xs text-muted-foreground">
@@ -228,6 +338,27 @@ export default function Transmissao() {
                   </button>
                 </div>
               )}
+              {libraryImages.length > 0 && (
+                <Select
+                  value={selectedImageLibId || "_none"}
+                  onValueChange={(v) => {
+                    setSelectedImageLibId(v === "_none" ? "" : v);
+                    if (v !== "_none") setImageFile(null);
+                  }}
+                >
+                  <SelectTrigger className="h-8 text-xs">
+                    <SelectValue placeholder="…ou usar foto pronta" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="_none">Anexar nova (acima)</SelectItem>
+                    {libraryImages.map((l) => (
+                      <SelectItem key={l.id} value={l.id}>
+                        {l.title}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
             </div>
             <div className="space-y-1.5">
               <Label className="flex items-center gap-1.5">
@@ -236,8 +367,9 @@ export default function Transmissao() {
               <input
                 type="file"
                 accept="audio/*"
+                disabled={!!selectedAudioLibId}
                 onChange={(e) => setAudioFile(e.target.files?.[0] || null)}
-                className="text-sm file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:bg-muted file:text-sm w-full"
+                className="text-sm file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:bg-muted file:text-sm w-full disabled:opacity-50"
               />
               {audioFile && (
                 <div className="flex items-center justify-between text-xs text-muted-foreground">
@@ -246,6 +378,27 @@ export default function Transmissao() {
                     <X className="w-3.5 h-3.5" />
                   </button>
                 </div>
+              )}
+              {libraryAudios.length > 0 && (
+                <Select
+                  value={selectedAudioLibId || "_none"}
+                  onValueChange={(v) => {
+                    setSelectedAudioLibId(v === "_none" ? "" : v);
+                    if (v !== "_none") setAudioFile(null);
+                  }}
+                >
+                  <SelectTrigger className="h-8 text-xs">
+                    <SelectValue placeholder="…ou usar áudio pronto" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="_none">Anexar novo (acima)</SelectItem>
+                    {libraryAudios.map((l) => (
+                      <SelectItem key={l.id} value={l.id}>
+                        {l.title}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               )}
             </div>
           </div>
@@ -258,11 +411,121 @@ export default function Transmissao() {
               placeholder="Vai junto com a foto (ou sozinho, se não anexar nada)."
               rows={3}
             />
+            {libraryTexts.length > 0 && (
+              <Select
+                value=""
+                onValueChange={(v) => {
+                  const item = libraryTexts.find((l) => l.id === v);
+                  if (item) setCaption(item.text_content || "");
+                }}
+              >
+                <SelectTrigger className="h-8 text-xs">
+                  <SelectValue placeholder="…ou usar texto pronto" />
+                </SelectTrigger>
+                <SelectContent>
+                  {libraryTexts.map((l) => (
+                    <SelectItem key={l.id} value={l.id}>
+                      {l.title}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
           </div>
 
           <Button onClick={handleSend} disabled={sending || !stageId} className="w-full">
             {sending ? "Enviando para a fila…" : "Enviar"}
           </Button>
+        </div>
+
+        <div className="border rounded-lg p-4 space-y-4">
+          <button
+            type="button"
+            onClick={() => setLibraryOpen((o) => !o)}
+            className="w-full flex items-center justify-between text-sm font-medium"
+          >
+            <span className="flex items-center gap-1.5">
+              <FileText className="w-4 h-4" /> Áudios, fotos e textos prontos
+            </span>
+            {libraryOpen ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+          </button>
+
+          {libraryOpen && (
+            <div className="space-y-4 pt-2 border-t">
+              <p className="text-xs text-muted-foreground">
+                Deixe pronto aqui (foto, áudio ou texto, com título) pra só escolher na hora de montar a
+                transmissão, sem precisar anexar o mesmo arquivo de novo.
+              </p>
+
+              <div className="grid sm:grid-cols-[8.5rem_1fr] gap-2">
+                <Select
+                  value={newKind}
+                  onValueChange={(v) => {
+                    setNewKind(v as LibraryKind);
+                    setNewFile(null);
+                    setNewText("");
+                  }}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="image">Foto</SelectItem>
+                    <SelectItem value="audio">Áudio</SelectItem>
+                    <SelectItem value="text">Texto</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Input
+                  placeholder='Título (ex: "Explicação do plano")'
+                  value={newTitle}
+                  onChange={(e) => setNewTitle(e.target.value)}
+                />
+              </div>
+
+              {newKind === "text" ? (
+                <Textarea
+                  placeholder="Escreva o texto pronto…"
+                  value={newText}
+                  onChange={(e) => setNewText(e.target.value)}
+                  rows={3}
+                />
+              ) : (
+                <input
+                  type="file"
+                  accept={newKind === "image" ? "image/*" : "audio/*"}
+                  onChange={(e) => setNewFile(e.target.files?.[0] || null)}
+                  className="text-sm file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:bg-muted file:text-sm w-full"
+                />
+              )}
+
+              <Button type="button" variant="secondary" size="sm" onClick={handleAddLibraryItem} disabled={savingItem}>
+                {savingItem ? "Salvando…" : "Salvar na biblioteca"}
+              </Button>
+
+              {library.length > 0 && (
+                <div className="space-y-1 pt-3 border-t">
+                  {library.map((item) => (
+                    <div key={item.id} className="flex items-center justify-between text-sm py-1">
+                      <span className="flex items-center gap-1.5 truncate">
+                        {item.kind === "image" && <ImageIcon className="w-3.5 h-3.5 shrink-0 text-muted-foreground" />}
+                        {item.kind === "audio" && <Mic className="w-3.5 h-3.5 shrink-0 text-muted-foreground" />}
+                        {item.kind === "text" && <FileText className="w-3.5 h-3.5 shrink-0 text-muted-foreground" />}
+                        <span className="truncate">{item.title}</span>
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteLibraryItem(item)}
+                        className="text-muted-foreground hover:text-destructive shrink-0 ml-2"
+                        title="Excluir"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         {history.length > 0 && (
