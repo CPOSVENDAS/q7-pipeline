@@ -25,6 +25,7 @@ import {
   Tag as TagIcon,
   Trash2,
   Bell,
+  MapPin,
 } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import { useNavigate, Link, useSearchParams } from "react-router-dom";
@@ -90,10 +91,12 @@ type Conversation = {
   installment_plan: number | null;
   due_day: number | null;
   notes: string | null;
+  lead_source_id: string | null;
 };
 
 type Tag = { id: string; name: string; color: string };
 type Reminder = { id: string; conversation_id: string; title: string; due_at: string; done_at: string | null };
+type LeadSource = { id: string; name: string };
 
 type Message = {
   id: string;
@@ -323,6 +326,75 @@ export default function Conversas() {
         loadTagsData();
       }
     }
+  };
+
+  // Origem do lead: catálogo pessoal (lead_sources), mesma filosofia das tags
+  // (o vendedor cadastra e mantém, não é texto livre) — mas é um campo único
+  // por conversa (FK direta em conversations.lead_source_id), não uma junção.
+  const [leadSources, setLeadSources] = useState<LeadSource[]>([]);
+  const [leadSourcePopoverOpen, setLeadSourcePopoverOpen] = useState(false);
+  const [newLeadSourceName, setNewLeadSourceName] = useState("");
+
+  const loadLeadSources = async () => {
+    const { data } = await supabase.from("lead_sources").select("id, name").order("name", { ascending: true });
+    setLeadSources((data as LeadSource[]) || []);
+  };
+
+  useEffect(() => {
+    if (!user) return;
+    loadLeadSources();
+    const ch = supabase
+      .channel("conversas-lead-sources")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "lead_sources", filter: `user_id=eq.${user.id}` },
+        loadLeadSources,
+      )
+      .subscribe();
+    return () => {
+      supabase.removeChannel(ch);
+    };
+  }, [user]);
+
+  const createLeadSource = async () => {
+    if (!user) return;
+    const name = newLeadSourceName.trim();
+    if (!name) return;
+    const { data, error } = await supabase
+      .from("lead_sources")
+      .insert({ user_id: user.id, name })
+      .select()
+      .single();
+    if (error) {
+      toast({ variant: "destructive", title: "Erro", description: error.message });
+      return;
+    }
+    if (data) {
+      setLeadSources((prev) => [...prev, data as LeadSource].sort((a, b) => a.name.localeCompare(b.name)));
+      // Já atribui à conversa aberta — fluxo comum: cadastrar a origem na hora de marcar.
+      if (active) setLeadSource((data as LeadSource).id);
+    }
+    setNewLeadSourceName("");
+  };
+
+  const deleteLeadSource = async (id: string) => {
+    const { error } = await supabase.from("lead_sources").delete().eq("id", id);
+    if (error) {
+      toast({ variant: "destructive", title: "Erro", description: error.message });
+      return;
+    }
+    // ON DELETE SET NULL já limpa conversations.lead_source_id no banco; espelha localmente.
+    setLeadSources((prev) => prev.filter((s) => s.id !== id));
+    setConversations((prev) => prev.map((c) => (c.lead_source_id === id ? { ...c, lead_source_id: null } : c)));
+  };
+
+  const setLeadSource = async (sourceId: string | null) => {
+    if (!active) return;
+    setConversations((prev) =>
+      prev.map((c) => (c.id === active.id ? { ...c, lead_source_id: sourceId } : c)),
+    );
+    const { error } = await supabase.from("conversations").update({ lead_source_id: sourceId }).eq("id", active.id);
+    if (error) toast({ variant: "destructive", title: "Erro", description: error.message });
   };
 
   // Busca na lista: nome, telefone, notas e nome das tags.
@@ -1348,6 +1420,91 @@ export default function Conversas() {
                       rows={5}
                       placeholder="Ex.: prefere ser contatado à noite, já tem outro plano com a concorrente..."
                     />
+                  </PopoverContent>
+                </Popover>
+                <Popover open={leadSourcePopoverOpen} onOpenChange={setLeadSourcePopoverOpen}>
+                  <PopoverTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className={`h-6 text-[11px] ${active.lead_source_id ? "text-primary" : ""}`}
+                    >
+                      <MapPin className="w-3 h-3 mr-1" />
+                      {leadSources.find((s) => s.id === active.lead_source_id)?.name || "Origem"}
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-64 space-y-3" align="start">
+                    <div className="space-y-1">
+                      <Label className="text-xs">De onde veio este lead</Label>
+                      {leadSources.length === 0 && (
+                        <p className="text-xs text-muted-foreground">Nenhuma origem cadastrada ainda.</p>
+                      )}
+                      <div className="space-y-1 max-h-40 overflow-y-auto">
+                        <button
+                          onClick={() => setLeadSource(null)}
+                          className="w-full flex items-center justify-between gap-2 text-xs px-2 py-1.5 rounded hover:bg-muted"
+                        >
+                          <span className="text-muted-foreground">Nenhuma</span>
+                          {!active.lead_source_id && <CheckCircle2 className="w-3.5 h-3.5 text-primary shrink-0" />}
+                        </button>
+                        {leadSources.map((s) => (
+                          <button
+                            key={s.id}
+                            onClick={() => setLeadSource(s.id)}
+                            className="w-full flex items-center justify-between gap-2 text-xs px-2 py-1.5 rounded hover:bg-muted"
+                          >
+                            <span>{s.name}</span>
+                            {active.lead_source_id === s.id && (
+                              <CheckCircle2 className="w-3.5 h-3.5 text-primary shrink-0" />
+                            )}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="space-y-1.5 pt-2 border-t">
+                      <Label className="text-xs">Nova origem</Label>
+                      <div className="flex items-center gap-1.5">
+                        <Input
+                          value={newLeadSourceName}
+                          onChange={(e) => setNewLeadSourceName(e.target.value)}
+                          placeholder="Ex.: Indicação, Panfleto, Bairro X..."
+                          className="h-7 text-xs"
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") {
+                              e.preventDefault();
+                              createLeadSource();
+                            }
+                          }}
+                        />
+                        <Button
+                          size="sm"
+                          className="h-7 px-2 shrink-0"
+                          onClick={createLeadSource}
+                          disabled={!newLeadSourceName.trim()}
+                        >
+                          <Plus className="w-3 h-3" />
+                        </Button>
+                      </div>
+                    </div>
+                    {leadSources.length > 0 && (
+                      <div className="space-y-1 pt-2 border-t">
+                        <Label className="text-xs text-muted-foreground">Gerenciar (excluir tira de todas as conversas)</Label>
+                        <div className="space-y-1 max-h-28 overflow-y-auto">
+                          {leadSources.map((s) => (
+                            <div key={s.id} className="flex items-center justify-between gap-2 text-xs px-2 py-1">
+                              <span className="truncate">{s.name}</span>
+                              <button
+                                onClick={() => deleteLeadSource(s.id)}
+                                className="text-muted-foreground hover:text-destructive shrink-0"
+                                title="Excluir esta origem"
+                              >
+                                <Trash2 className="w-3 h-3" />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </PopoverContent>
                 </Popover>
               </div>

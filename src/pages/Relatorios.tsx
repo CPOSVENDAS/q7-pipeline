@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/hooks/use-toast";
-import { Download, LogOut, MessageSquare, Trello, TrendingUp, Trophy, XCircle, Percent, Target, Banknote, Send, Megaphone } from "lucide-react";
+import { Download, LogOut, MessageSquare, Trello, TrendingUp, Trophy, XCircle, Percent, Target, Banknote, Send, Megaphone, MapPin } from "lucide-react";
 import {
   Bar,
   BarChart,
@@ -35,9 +35,11 @@ type DealRow = {
   client_type: string | null;
   installment_plan: number | null;
   due_day: number | null;
+  lead_source_id: string | null;
 };
 
 type InstallmentRow = { conversation_id: string; installment_no: number; paid_at: string | null };
+type LeadSource = { id: string; name: string };
 
 type CommissionLevel = { nome: string; quantPlanos: number; valores: number[] };
 type CommissionTable = { valorAdesao: number; faixas: string[]; niveis: CommissionLevel[] };
@@ -126,6 +128,7 @@ export default function Relatorios() {
   const navigate = useNavigate();
   const [rows, setRows] = useState<DealRow[]>([]);
   const [installments, setInstallments] = useState<InstallmentRow[]>([]);
+  const [leadSources, setLeadSources] = useState<LeadSource[]>([]);
   const [loading, setLoading] = useState(true);
   const [year, setYear] = useState<number>(new Date().getFullYear());
   const [exporting, setExporting] = useState(false);
@@ -142,7 +145,7 @@ export default function Relatorios() {
       const { data, error } = await supabase
         .from("conversations")
         .select(
-          "id, contact_name, contact_phone, deal_value, closed_at, lost_at, commission_eligible, client_type, installment_plan, due_day",
+          "id, contact_name, contact_phone, deal_value, closed_at, lost_at, commission_eligible, client_type, installment_plan, due_day, lead_source_id",
         )
         .or("closed_at.not.is.null,lost_at.not.is.null");
       if (error) {
@@ -154,6 +157,11 @@ export default function Relatorios() {
         .from("sale_installments")
         .select("conversation_id, installment_no, paid_at");
       if (!instError) setInstallments((instData as InstallmentRow[]) || []);
+      const { data: sourceData, error: sourceError } = await supabase
+        .from("lead_sources")
+        .select("id, name")
+        .order("name", { ascending: true });
+      if (!sourceError) setLeadSources((sourceData as LeadSource[]) || []);
       const { data: actualsData, error: actualsError } = await supabase
         .from("commission_actuals")
         .select("year, month, valor_real");
@@ -182,6 +190,11 @@ export default function Relatorios() {
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "commission_actuals", filter: `user_id=eq.${user.id}` },
+        load,
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "lead_sources", filter: `user_id=eq.${user.id}` },
         load,
       )
       .subscribe();
@@ -297,6 +310,28 @@ export default function Relatorios() {
     const avgTicket = wonCount > 0 ? totalRevenue / wonCount : null;
     return { totalRevenue, wonCount, lostCount, conversion, avgTicket };
   }, [won, lost, year]);
+
+  // Vendas por origem do lead — agrupa todas as vendas fechadas (ganhas ou
+  // perdidas) do ano selecionado pela origem cadastrada em Conversas, pra
+  // ajudar a decidir onde investir o esforço de prospecção. Sem origem
+  // atribuída entra no grupo "Sem origem" (não some da conta).
+  const bySource = useMemo(() => {
+    const wonThisYear = won.filter((r) => new Date(r.closed_at as string).getFullYear() === year);
+    const lostThisYear = lost.filter((r) => new Date(r.lost_at as string).getFullYear() === year);
+    const nameOf = (id: string | null) => (id ? leadSources.find((s) => s.id === id)?.name || "Origem removida" : "Sem origem");
+    const map = new Map<string, { label: string; won: number; lost: number }>();
+    const bump = (id: string | null, key: "won" | "lost") => {
+      const label = nameOf(id);
+      const entry = map.get(label) || { label, won: 0, lost: 0 };
+      entry[key]++;
+      map.set(label, entry);
+    };
+    wonThisYear.forEach((r) => bump(r.lead_source_id, "won"));
+    lostThisYear.forEach((r) => bump(r.lead_source_id, "lost"));
+    return Array.from(map.values())
+      .map((e) => ({ ...e, total: e.won + e.lost, conversion: e.won + e.lost > 0 ? (e.won / (e.won + e.lost)) * 100 : null }))
+      .sort((a, b) => b.total - a.total);
+  }, [won, lost, year, leadSources]);
 
   // Meta do mês: sempre o mês/ano ATUAIS (independe do filtro de ano acima) —
   // é o "estamos batendo a meta agora" do dia a dia, não um corte histórico.
@@ -552,6 +587,7 @@ export default function Relatorios() {
         { header: "Status", key: "status", width: 12 },
         { header: "Valor (R$)", key: "value", width: 14 },
         { header: "Data", key: "date", width: 14 },
+        { header: "Origem", key: "source", width: 18 },
       ];
       rows.forEach((r) => {
         const isWon = !!r.closed_at;
@@ -561,6 +597,7 @@ export default function Relatorios() {
           status: isWon ? "Ganha" : "Perdida",
           value: r.deal_value ?? "",
           date: new Date((r.closed_at || r.lost_at) as string).toLocaleDateString("pt-BR"),
+          source: r.lead_source_id ? leadSources.find((s) => s.id === r.lead_source_id)?.name || "Origem removida" : "Sem origem",
         });
       });
       vendas.getRow(1).font = { bold: true };
@@ -790,6 +827,45 @@ export default function Relatorios() {
               </LineChart>
             </ResponsiveContainer>
           </div>
+        </div>
+
+        {/* Vendas por origem do lead — catálogo cadastrado pelo vendedor em
+            Conversas (indicação, panfleto, bairro, etc.), pra ver onde vale
+            mais a pena investir esforço de prospecção. */}
+        <div className="glass-card rounded-lg p-4 overflow-x-auto">
+          <div className="flex items-center gap-2 text-sm font-medium mb-1">
+            <MapPin className="w-4 h-4 text-chart-current" /> Vendas por origem do lead — {year}
+          </div>
+          <p className="text-xs text-muted-foreground mb-3">
+            Cadastre e atribua a origem de cada lead na tela de Conversas (botão "Origem"). "Sem origem" agrupa os leads
+            sem essa atribuição ainda.
+          </p>
+          {bySource.length === 0 ? (
+            <div className="text-sm text-muted-foreground py-2">Nenhuma venda ganha ou perdida registrada em {year} ainda.</div>
+          ) : (
+            <table className="w-full text-sm min-w-[480px]">
+              <thead>
+                <tr className="text-left text-xs text-muted-foreground border-b">
+                  <th className="py-1.5 pr-4 font-medium">Origem</th>
+                  <th className="py-1.5 pr-4 font-medium">Vendas</th>
+                  <th className="py-1.5 pr-4 font-medium">Ganhas</th>
+                  <th className="py-1.5 pr-4 font-medium">Perdidas</th>
+                  <th className="py-1.5 pr-2 font-medium">Conversão</th>
+                </tr>
+              </thead>
+              <tbody>
+                {bySource.map((s) => (
+                  <tr key={s.label} className="border-b last:border-0">
+                    <td className="py-1.5 pr-4 font-medium">{s.label}</td>
+                    <td className="py-1.5 pr-4 tabular-nums">{s.total}</td>
+                    <td className="py-1.5 pr-4 tabular-nums text-chart-good">{s.won}</td>
+                    <td className="py-1.5 pr-4 tabular-nums text-chart-bad">{s.lost}</td>
+                    <td className="py-1.5 pr-2 tabular-nums">{s.conversion != null ? `${s.conversion.toFixed(0)}%` : "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
         </div>
 
         {/* Adimplência por parcela — janela móvel dos últimos 12 meses (não
