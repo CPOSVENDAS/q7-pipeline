@@ -24,6 +24,7 @@ import {
   StickyNote,
   Tag as TagIcon,
   Trash2,
+  Bell,
 } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import { useNavigate, Link, useSearchParams } from "react-router-dom";
@@ -92,6 +93,7 @@ type Conversation = {
 };
 
 type Tag = { id: string; name: string; color: string };
+type Reminder = { id: string; conversation_id: string; title: string; due_at: string; done_at: string | null };
 
 type Message = {
   id: string;
@@ -337,6 +339,112 @@ export default function Conversas() {
       return name.includes(q) || phone.includes(q) || notes.includes(q) || tagNames.includes(q);
     });
   }, [conversations, search, conversationTagIds, tags]);
+
+  // Lembretes de tarefa — lista interna por conversa, sem notificação push
+  // (decisão do usuário). Carrega todos os pendentes do vendedor de uma vez
+  // (não só da conversa aberta) pra alimentar a lista global no sininho.
+  const [reminders, setReminders] = useState<Reminder[]>([]);
+  const [remindersDialogOpen, setRemindersDialogOpen] = useState(false);
+  const [reminderPopoverOpen, setReminderPopoverOpen] = useState(false);
+  const [newReminderTitle, setNewReminderTitle] = useState("");
+  const [remPreset, setRemPreset] = useState("tomorrow");
+  const [remCustom, setRemCustom] = useState("");
+
+  const loadReminders = async () => {
+    const { data } = await supabase
+      .from("reminders")
+      .select("id, conversation_id, title, due_at, done_at")
+      .is("done_at", null)
+      .order("due_at", { ascending: true });
+    setReminders((data as Reminder[]) || []);
+  };
+
+  useEffect(() => {
+    if (!user) return;
+    loadReminders();
+    const ch = supabase
+      .channel("conversas-reminders")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "reminders", filter: `user_id=eq.${user.id}` },
+        loadReminders,
+      )
+      .subscribe();
+    return () => {
+      supabase.removeChannel(ch);
+    };
+  }, [user]);
+
+  const scheduleReminder = async () => {
+    if (!active || !user) return;
+    const title = newReminderTitle.trim();
+    if (!title) {
+      toast({ variant: "destructive", title: "Escreva o que precisa lembrar" });
+      return;
+    }
+    let dueAt: Date;
+    const now = Date.now();
+    if (remPreset === "later_today") dueAt = new Date(now + 3 * 3600_000);
+    else if (remPreset === "tomorrow") {
+      const d = new Date();
+      d.setDate(d.getDate() + 1);
+      d.setHours(9, 0, 0, 0);
+      dueAt = d;
+    } else if (remPreset === "this_week") {
+      const d = new Date();
+      d.setDate(d.getDate() + 3);
+      d.setHours(9, 0, 0, 0);
+      dueAt = d;
+    } else if (remPreset === "custom") {
+      if (!remCustom) {
+        toast({ variant: "destructive", title: "Escolha data e hora" });
+        return;
+      }
+      dueAt = new Date(remCustom);
+    } else return;
+
+    const { error } = await supabase.from("reminders").insert({
+      user_id: user.id,
+      conversation_id: active.id,
+      title,
+      due_at: dueAt.toISOString(),
+    });
+    if (error) {
+      toast({ variant: "destructive", title: "Erro", description: error.message });
+    } else {
+      toast({ title: "Lembrete criado" });
+      setNewReminderTitle("");
+      setRemCustom("");
+      setReminderPopoverOpen(false);
+    }
+  };
+
+  const completeReminder = async (id: string) => {
+    setReminders((prev) => prev.filter((r) => r.id !== id));
+    const { error } = await supabase.from("reminders").update({ done_at: new Date().toISOString() }).eq("id", id);
+    if (error) {
+      toast({ variant: "destructive", title: "Erro", description: error.message });
+      loadReminders();
+    }
+  };
+
+  const deleteReminder = async (id: string) => {
+    setReminders((prev) => prev.filter((r) => r.id !== id));
+    const { error } = await supabase.from("reminders").delete().eq("id", id);
+    if (error) {
+      toast({ variant: "destructive", title: "Erro", description: error.message });
+      loadReminders();
+    }
+  };
+
+  const conversationReminders = useMemo(
+    () => (active ? reminders.filter((r) => r.conversation_id === active.id) : []),
+    [reminders, active],
+  );
+  const overdueCount = useMemo(
+    () => reminders.filter((r) => new Date(r.due_at).getTime() <= Date.now()).length,
+    [reminders],
+  );
 
   // Load conversations + realtime
   useEffect(() => {
@@ -832,6 +940,27 @@ export default function Conversas() {
           <Button variant="ghost" size="icon" className="sm:hidden" onClick={() => navigate("/transmissao")} title="Transmissão">
             <Megaphone className="w-4 h-4" />
           </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="relative"
+            onClick={() => setRemindersDialogOpen(true)}
+            title="Lembretes"
+          >
+            <Bell className="w-4 h-4 sm:mr-2" />
+            <span className="hidden sm:inline">Lembretes</span>
+            {reminders.length > 0 && (
+              <span
+                className={`absolute -top-1 -right-1 sm:static sm:ml-1.5 text-[10px] rounded-full px-1.5 py-0.5 leading-none ${
+                  overdueCount > 0
+                    ? "bg-destructive text-destructive-foreground"
+                    : "bg-primary text-primary-foreground"
+                }`}
+              >
+                {reminders.length}
+              </span>
+            )}
+          </Button>
           <ThemeToggle />
           {isAdmin && (
             <Button variant="ghost" size="sm" onClick={() => navigate("/admin/equipe")}>
@@ -858,6 +987,75 @@ export default function Conversas() {
       </header>
 
       <ConfigDrawer open={configOpen} onOpenChange={setConfigOpen} />
+
+      <Dialog open={remindersDialogOpen} onOpenChange={setRemindersDialogOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Lembretes pendentes</DialogTitle>
+            <DialogDescription>
+              Todos os lembretes que você criou, de todas as conversas, ordenados pelo mais próximo de vencer.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="max-h-[60vh] overflow-y-auto space-y-2">
+            {reminders.length === 0 && (
+              <p className="text-sm text-muted-foreground text-center py-6">Nenhum lembrete pendente.</p>
+            )}
+            {reminders.map((r) => {
+              const conv = conversations.find((c) => c.id === r.conversation_id);
+              const overdue = new Date(r.due_at).getTime() <= Date.now();
+              return (
+                <div
+                  key={r.id}
+                  className={`flex items-center gap-2 border rounded-md px-3 py-2 text-sm ${
+                    overdue ? "border-destructive/40 bg-destructive/5" : ""
+                  }`}
+                >
+                  <Bell className={`w-4 h-4 shrink-0 ${overdue ? "text-destructive" : "text-primary"}`} />
+                  <div className="flex-1 min-w-0">
+                    <div className="font-medium truncate">{r.title}</div>
+                    <div className="text-xs text-muted-foreground truncate">
+                      {conv ? conv.contact_name || conv.contact_phone : "Conversa removida"}
+                      {" · "}
+                      <span className={overdue ? "text-destructive" : ""}>
+                        {overdue ? "atrasado — " : ""}
+                        {new Date(r.due_at).toLocaleString("pt-BR", {
+                          day: "2-digit",
+                          month: "2-digit",
+                          hour: "2-digit",
+                          minute: "2-digit",
+                        })}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1 shrink-0">
+                    {conv && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 text-xs"
+                        onClick={() => {
+                          setActiveId(conv.id);
+                          setRemindersDialogOpen(false);
+                        }}
+                      >
+                        Abrir
+                      </Button>
+                    )}
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 text-xs text-success hover:text-success"
+                      onClick={() => completeReminder(r.id)}
+                    >
+                      <CheckCircle2 className="w-3.5 h-3.5 mr-1" /> Concluir
+                    </Button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Main */}
       <div className="flex-1 grid grid-cols-1 md:grid-cols-[320px_1fr] gap-0 overflow-hidden">
@@ -1167,6 +1365,96 @@ export default function Conversas() {
                   />
                 </div>
               )}
+
+              {/* Lembretes de tarefa desta conversa (pessoal, sem relação com a IA/WhatsApp) */}
+              <div className="px-3 py-2 border-b bg-muted/30 space-y-1.5">
+                {conversationReminders.length > 0 && (
+                  <div className="space-y-1.5">
+                    {conversationReminders.map((r) => {
+                      const overdue = new Date(r.due_at).getTime() <= Date.now();
+                      return (
+                        <div
+                          key={r.id}
+                          className={`flex items-center gap-2 bg-background border rounded-md px-3 py-2 text-xs ${
+                            overdue ? "border-destructive/40" : ""
+                          }`}
+                        >
+                          <Bell className={`w-4 h-4 shrink-0 ${overdue ? "text-destructive" : "text-primary"}`} />
+                          <div className="flex-1 min-w-0">
+                            <div className="font-medium truncate">{r.title}</div>
+                            <div className={`text-muted-foreground truncate ${overdue ? "text-destructive" : ""}`}>
+                              {overdue ? "atrasado — " : ""}
+                              {new Date(r.due_at).toLocaleString("pt-BR", {
+                                day: "2-digit",
+                                month: "2-digit",
+                                hour: "2-digit",
+                                minute: "2-digit",
+                              })}
+                            </div>
+                          </div>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 text-xs"
+                            onClick={() => completeReminder(r.id)}
+                          >
+                            <CheckCircle2 className="w-3 h-3 mr-1" /> Concluir
+                          </Button>
+                          <button
+                            onClick={() => deleteReminder(r.id)}
+                            className="text-muted-foreground hover:text-destructive p-1"
+                            title="Excluir lembrete"
+                          >
+                            <Trash2 className="w-3 h-3" />
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+                <Popover open={reminderPopoverOpen} onOpenChange={setReminderPopoverOpen}>
+                  <PopoverTrigger asChild>
+                    <Button variant="ghost" size="sm" className="h-7 text-xs">
+                      <Bell className="w-3 h-3 mr-1" /> Novo lembrete
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-80 space-y-3" align="start">
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">O que lembrar</Label>
+                      <Input
+                        value={newReminderTitle}
+                        onChange={(e) => setNewReminderTitle(e.target.value)}
+                        placeholder="Ex.: ligar pra confirmar o endereço"
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">Quando</Label>
+                      <Select value={remPreset} onValueChange={setRemPreset}>
+                        <SelectTrigger><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="later_today">Daqui a 3 horas</SelectItem>
+                          <SelectItem value="tomorrow">Amanhã às 9h</SelectItem>
+                          <SelectItem value="this_week">Em 3 dias às 9h</SelectItem>
+                          <SelectItem value="custom">Escolher data/hora</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    {remPreset === "custom" && (
+                      <div className="space-y-1.5">
+                        <Label className="text-xs">Data e hora</Label>
+                        <Input
+                          type="datetime-local"
+                          value={remCustom}
+                          onChange={(e) => setRemCustom(e.target.value)}
+                        />
+                      </div>
+                    )}
+                    <Button size="sm" className="w-full" onClick={scheduleReminder}>
+                      Criar lembrete
+                    </Button>
+                  </PopoverContent>
+                </Popover>
+              </div>
 
               {/* Follow-ups pendentes / agendar */}
               <div className="px-3 py-2 border-b bg-muted/30 space-y-2">
