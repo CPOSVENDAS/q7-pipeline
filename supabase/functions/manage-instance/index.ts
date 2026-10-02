@@ -236,6 +236,23 @@ serve(async (req) => {
       // O token já identifica a instância: nome, telefone e perfil vêm de graça.
       // Isso dispensa o usuário de digitar o nome à mão.
       const inst = data?.instance ?? {};
+
+      // Grava o status checado manualmente (clique em "Conectar", diagnóstico,
+      // etc.) — mesma tabela que o evento `connection` do webhook atualiza
+      // sozinho. Assim o painel nunca mostra um status mais velho que o que
+      // acabamos de confirmar na Uazapi. Best-effort: não derruba a resposta.
+      try {
+        await admin
+          .from("whatsapp_instances")
+          .update({
+            status: isConnected ? "connected" : "disconnected",
+            ...(isConnected ? {} : { last_disconnected_at: new Date().toISOString() }),
+          })
+          .eq("instance_token", instance_token);
+      } catch (e) {
+        console.error("[status] falha ao gravar status", e);
+      }
+
       return json({
         ok: true,
         connected: isConnected,
@@ -304,10 +321,13 @@ serve(async (req) => {
         // URL inválida: segue com o valor original e deixa a Uazapi reclamar
       }
 
+      // "connection" avisa quando a sessão do WhatsApp cai ou volta — sem
+      // isso o painel só descobre que caiu quando alguém clica em "Conectar"
+      // de novo, e a IA fica tentando responder em silêncio até lá.
       const webhookBody = {
         enabled: true,
         url: finalWebhookUrl,
-        events: ["messages"],
+        events: ["messages", "connection"],
         excludeMessages: ["wasSentByApi"],
         addUrlEvents: false,
       };

@@ -19,10 +19,11 @@ import {
   useDroppable,
   useDraggable,
 } from "@dnd-kit/core";
-import { BarChart3, Bot, Clock, LogOut, MessageSquare, Plus, Settings, Trash2, User, Pencil, Trophy, XCircle, Heart, Megaphone } from "lucide-react";
+import { BarChart3, Bot, Clock, LogOut, MessageSquare, Plus, Settings, Trash2, User, Pencil, Trophy, XCircle, Heart, Megaphone, Smartphone } from "lucide-react";
 import { ConfigDrawer } from "@/components/ConfigDrawer";
 import { InstallmentChecklist } from "@/components/InstallmentChecklist";
 import { SaleInstallment, groupInstallments } from "@/lib/installments";
+import { useWhatsappStatus } from "@/hooks/useWhatsappStatus";
 import {
   Dialog,
   DialogContent,
@@ -301,6 +302,7 @@ function Column({
 export default function Kanban() {
   const { user, signOut } = useAuth();
   const navigate = useNavigate();
+  const { connected: waConnected, hasInstance: waHasInstance } = useWhatsappStatus();
   const [stages, setStages] = useState<Stage[]>([]);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [installments, setInstallments] = useState<SaleInstallment[]>([]);
@@ -553,6 +555,27 @@ export default function Kanban() {
           <Button variant="ghost" size="icon" className="sm:hidden" onClick={() => navigate("/transmissao")} title="Transmissão">
             <Megaphone className="w-4 h-4" />
           </Button>
+          {waHasInstance && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setConfigOpen(true)}
+              title={
+                waConnected
+                  ? "WhatsApp conectado"
+                  : "WhatsApp desconectado — clique para reconectar em Configuração"
+              }
+              className={!waConnected ? "text-destructive hover:text-destructive" : ""}
+            >
+              <Smartphone className="w-4 h-4 sm:mr-2" />
+              <span className="hidden sm:inline">{waConnected ? "WhatsApp" : "Desconectado"}</span>
+              <span
+                className={`ml-1.5 w-1.5 h-1.5 rounded-full shrink-0 ${
+                  waConnected ? "bg-emerald-500" : "bg-destructive animate-pulse"
+                }`}
+              />
+            </Button>
+          )}
           <Button variant="ghost" size="sm" onClick={() => setConfigOpen(true)}>
             <Settings className="w-4 h-4 sm:mr-2" />
             <span className="hidden sm:inline">Configuração</span>

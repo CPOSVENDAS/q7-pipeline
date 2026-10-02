@@ -106,6 +106,116 @@ function extractText(body: any) {
   return { text, media, fromMe, phone, isGroup, contactName, instanceName, instanceToken, instanceOwner, message: m };
 }
 
+/**
+ * Acha a linha de `whatsapp_instances` dona do evento. Mesma regra usada no
+ * fluxo de mensagens: o token já identifica a instância sozinho; nome e
+ * telefone (fáceis de descobrir) só valem como fallback quando a chamada
+ * trouxe a chave (`?k=`) que o `manage-instance` anexa ao registrar o
+ * webhook — sem isso, qualquer um poderia forjar eventos para uma instância
+ * que não é dele.
+ */
+async function resolveInstance(
+  supabase: ReturnType<typeof createClient>,
+  keyOk: boolean,
+  info: { instanceToken: string | null; instanceName: string; instanceOwner: string },
+): Promise<any> {
+  const { instanceToken, instanceName, instanceOwner } = info;
+  let instRow: any = null;
+  if (instanceToken) {
+    const { data } = await supabase
+      .from("whatsapp_instances")
+      .select("*")
+      .eq("instance_token", instanceToken)
+      .maybeSingle();
+    instRow = data;
+  }
+  if (!instRow && !keyOk && (instanceName || instanceOwner)) {
+    console.warn("[webhook] fallback por nome/telefone ignorado: chamada sem chave válida", {
+      instanceName,
+      hasToken: !!instanceToken,
+    });
+  }
+  if (!instRow && keyOk && instanceName) {
+    const { data } = await supabase
+      .from("whatsapp_instances")
+      .select("*")
+      .eq("name", instanceName)
+      .maybeSingle();
+    instRow = data;
+  }
+  if (!instRow && keyOk && instanceName) {
+    const { data } = await supabase
+      .from("whatsapp_instances")
+      .select("*")
+      .not("instance_token", "is", null)
+      .order("updated_at", { ascending: false })
+      .limit(20);
+    instRow = (data || []).find((row: any) => normalizeName(row.name) === normalizeName(instanceName)) || null;
+  }
+  // Último recurso: o telefone da instância (`owner`) vem em todo payload da Uazapi
+  if (!instRow && keyOk && instanceOwner) {
+    const { data } = await supabase
+      .from("whatsapp_instances")
+      .select("*")
+      .eq("phone", instanceOwner)
+      .order("updated_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    instRow = data;
+  }
+  return instRow;
+}
+
+/**
+ * Evento `connection` da Uazapi: a sessão do WhatsApp caiu ou voltou. Antes
+ * esse evento chegava e era descartado sem nenhum tratamento — o painel só
+ * descobria a queda quando alguém clicava em "Conectar" de novo, e a IA
+ * ficava tentando responder em silêncio até lá. Agora gravamos a mudança na
+ * hora em `whatsapp_instances`; o front-end escuta essa tabela via Realtime
+ * e avisa o vendedor assim que a sessão cai.
+ */
+async function handleConnectionEvent(body: any, req: Request) {
+  const instanceName = body.instance?.name || body.instanceName || "";
+  const instanceToken = body.token || body.instance?.token || null;
+  const instanceOwner = jidToPhone(body.owner || body.instance?.owner);
+
+  // Mesma normalização usada em manage-instance (ação "status"): a Uazapi
+  // descreve o status ora como objeto ({connected:true}), ora como string
+  // ("open"/"connected"/"close"), ora como booleano solto.
+  const statusVal = body.status ?? body.instance?.status ?? body.state ?? body.connection;
+  const isConnected =
+    (typeof statusVal === "object" && statusVal !== null && (statusVal as any)?.connected === true) ||
+    (typeof statusVal === "string" && ["open", "connected", "CONNECTED"].includes(statusVal)) ||
+    body.loggedIn === true ||
+    body.instance?.loggedIn === true;
+
+  console.log("[webhook] connection event", {
+    instanceName,
+    hasToken: !!instanceToken,
+    status: typeof statusVal === "string" ? statusVal : JSON.stringify(statusVal),
+    isConnected,
+  });
+
+  const supabase = createClient(
+    Deno.env.get("SUPABASE_URL")!,
+    Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
+  );
+  const expectedKey = await webhookKey();
+  const keyOk = !!expectedKey && new URL(req.url).searchParams.get("k") === expectedKey;
+  const instRow = await resolveInstance(supabase, keyOk, { instanceToken, instanceName, instanceOwner });
+  if (!instRow) {
+    console.warn("[webhook] connection event: instancia nao encontrada", { instanceName, hasToken: !!instanceToken });
+    return ok();
+  }
+
+  const update: Record<string, any> = { status: isConnected ? "connected" : "disconnected" };
+  if (!isConnected) update.last_disconnected_at = new Date().toISOString();
+  await supabase.from("whatsapp_instances").update(update).eq("id", instRow.id);
+  console.log("[webhook] connection event aplicado", { id: instRow.id, name: instRow.name, status: update.status });
+
+  return ok();
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
@@ -114,7 +224,7 @@ serve(async (req) => {
     const event = body.EventType || body.event || body.type || "messages";
     if (event === "test") return ok({ ok: true, message: "webhook ok" });
     if (event === "dry_run") return await runDryRun(body);
-    if (event === "connection" || event === "connection.update") return ok();
+    if (event === "connection" || event === "connection.update") return await handleConnectionEvent(body, req);
 
     const { text, media, fromMe, phone, isGroup, contactName, instanceName, instanceToken, instanceOwner } =
       extractText(body);
@@ -151,50 +261,7 @@ serve(async (req) => {
     // pessoa poderia forjar mensagens e fazer a IA responder a números escolhidos por ela.
     const expectedKey = await webhookKey();
     const keyOk = !!expectedKey && new URL(req.url).searchParams.get("k") === expectedKey;
-    let instRow: any = null;
-    if (instanceToken) {
-      const { data } = await supabase
-        .from("whatsapp_instances")
-        .select("*")
-        .eq("instance_token", instanceToken)
-        .maybeSingle();
-      instRow = data;
-    }
-    if (!instRow && !keyOk && (instanceName || instanceOwner)) {
-      console.warn("[webhook] fallback por nome/telefone ignorado: chamada sem chave válida", {
-        instanceName,
-        hasToken: !!instanceToken,
-      });
-    }
-    if (!instRow && keyOk && instanceName) {
-      const { data } = await supabase
-        .from("whatsapp_instances")
-        .select("*")
-        .eq("name", instanceName)
-        .maybeSingle();
-      instRow = data;
-    }
-    if (!instRow && keyOk && instanceName) {
-      const { data } = await supabase
-        .from("whatsapp_instances")
-        .select("*")
-        .not("instance_token", "is", null)
-        .order("updated_at", { ascending: false })
-        .limit(20);
-
-      instRow = (data || []).find((row: any) => normalizeName(row.name) === normalizeName(instanceName)) || null;
-    }
-    // Último recurso: o telefone da instância (`owner`) vem em todo payload da Uazapi
-    if (!instRow && keyOk && instanceOwner) {
-      const { data } = await supabase
-        .from("whatsapp_instances")
-        .select("*")
-        .eq("phone", instanceOwner)
-        .order("updated_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-      instRow = data;
-    }
+    const instRow = await resolveInstance(supabase, keyOk, { instanceToken, instanceName, instanceOwner });
     if (!instRow) {
       console.warn("[webhook] instance not found", {
         instanceName,

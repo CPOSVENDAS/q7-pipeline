@@ -49,6 +49,17 @@ function CheckRow({ ok, warn, label }: { ok?: boolean; warn?: boolean; label: st
   );
 }
 
+/** "há 5 min" / "há 3h" / "há 2d" — só para dar noção de quanto tempo já caiu. */
+function timeAgo(iso: string): string {
+  const diffMs = Date.now() - new Date(iso).getTime();
+  const min = Math.floor(diffMs / 60000);
+  if (min < 1) return "agora";
+  if (min < 60) return `há ${min} min`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `há ${hr}h`;
+  return `há ${Math.floor(hr / 24)}d`;
+}
+
 export function ConfigDrawer({ open, onOpenChange }: Props) {
   const { user } = useAuth();
   const { isAdmin } = useAdminRole();
@@ -71,6 +82,7 @@ export function ConfigDrawer({ open, onOpenChange }: Props) {
   const [instanceName, setInstanceName] = useState("");
   const [instancePhone, setInstancePhone] = useState("");
   const [instanceConnected, setInstanceConnected] = useState<boolean | null>(null);
+  const [lastDisconnectedAt, setLastDisconnectedAt] = useState<string | null>(null);
   const [serverUrl, setServerUrl] = useState("");
   const [instanceToken, setInstanceToken] = useState("");
   const [hasInstanceToken, setHasInstanceToken] = useState(false);
@@ -105,7 +117,7 @@ export function ConfigDrawer({ open, onOpenChange }: Props) {
     if (!user) return;
     const { data } = await supabase
       .from("whatsapp_instances")
-      .select("id,name,phone,status,server_url,instance_token")
+      .select("id,name,phone,status,server_url,instance_token,last_disconnected_at")
       .eq("user_id", user.id)
       .order("updated_at", { ascending: false })
       .limit(1)
@@ -117,6 +129,7 @@ export function ConfigDrawer({ open, onOpenChange }: Props) {
       setInstanceConnected(data.status === "connected");
       setServerUrl(data.server_url || "");
       setHasInstanceToken(!!data.instance_token);
+      setLastDisconnectedAt((data as any).last_disconnected_at || null);
     }
   };
 
@@ -124,6 +137,21 @@ export function ConfigDrawer({ open, onOpenChange }: Props) {
     if (!open) return;
     loadAgent();
     loadUazapi();
+    // Enquanto o painel estiver aberto, reflete ao vivo uma queda de conexão
+    // detectada pelo evento `connection` do webhook — sem precisar fechar e
+    // reabrir para ver o status mudar.
+    if (!user) return;
+    const ch = supabase
+      .channel("config-drawer-whatsapp-status")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "whatsapp_instances", filter: `user_id=eq.${user.id}` },
+        loadUazapi,
+      )
+      .subscribe();
+    return () => {
+      supabase.removeChannel(ch);
+    };
   }, [open, user]);
 
   /** Token da instância: o que foi digitado agora ou o que já está salvo. */
@@ -439,7 +467,7 @@ export function ConfigDrawer({ open, onOpenChange }: Props) {
                   label={
                     instanceConnected
                       ? `WhatsApp conectado${instancePhone ? ` — ${instancePhone}` : ""}`
-                      : "WhatsApp desconectado — leia o QR Code no painel da Uazapi"
+                      : `WhatsApp desconectado${lastDisconnectedAt ? ` (${timeAgo(lastDisconnectedAt)})` : ""} — leia o QR Code no painel da Uazapi`
                   }
                 />
                 {webhookOk !== null && (

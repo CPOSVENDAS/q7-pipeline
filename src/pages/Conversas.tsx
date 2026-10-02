@@ -26,6 +26,7 @@ import {
   Trash2,
   Bell,
   MapPin,
+  Smartphone,
 } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import { useNavigate, Link, useSearchParams } from "react-router-dom";
@@ -34,6 +35,7 @@ import { ThemeToggle } from "@/components/ThemeToggle";
 import { brandWatermarkStyle } from "@/lib/brandWatermark";
 import { ConfigDrawer } from "@/components/ConfigDrawer";
 import { useAdminRole } from "@/hooks/useAdminRole";
+import { useWhatsappStatus } from "@/hooks/useWhatsappStatus";
 import { InstallmentChecklist } from "@/components/InstallmentChecklist";
 import { SaleInstallment, groupInstallments } from "@/lib/installments";
 import {
@@ -145,6 +147,7 @@ export default function Conversas() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const { isAdmin } = useAdminRole();
+  const { connected: waConnected, hasInstance: waHasInstance } = useWhatsappStatus();
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [installments, setInstallments] = useState<SaleInstallment[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -1033,6 +1036,27 @@ export default function Conversas() {
               </span>
             )}
           </Button>
+          {waHasInstance && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setConfigOpen(true)}
+              title={
+                waConnected
+                  ? "WhatsApp conectado"
+                  : "WhatsApp desconectado — clique para reconectar em Configuração"
+              }
+              className={!waConnected ? "text-destructive hover:text-destructive" : ""}
+            >
+              <Smartphone className="w-4 h-4 sm:mr-2" />
+              <span className="hidden sm:inline">{waConnected ? "WhatsApp" : "Desconectado"}</span>
+              <span
+                className={`ml-1.5 w-1.5 h-1.5 rounded-full shrink-0 ${
+                  waConnected ? "bg-emerald-500" : "bg-destructive animate-pulse"
+                }`}
+              />
+            </Button>
+          )}
           <ThemeToggle />
           {isAdmin && (
             <Button variant="ghost" size="sm" onClick={() => navigate("/admin/equipe")}>
